@@ -1,5 +1,6 @@
 package com.psprofi.etchedytdlp.YouTube;
 
+import com.psprofi.etchedytdlp.core.DownloadTracker;
 import gg.moonflower.etched.api.util.DownloadProgressListener;
 import net.minecraft.network.chat.Component;
 import org.jetbrains.annotations.Nullable;
@@ -16,6 +17,7 @@ import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 
 /**
  * Handles audio downloading and caching via yt-dlp with automatic format conversion
@@ -91,7 +93,12 @@ public class YtDlpDownloader {
     /**
      * Converts an audio file to mp3 format using FFmpeg
      */
-    private static Path convertToMp3(Path inputFile, @Nullable DownloadProgressListener progressListener) throws IOException {
+    private static Path convertToMp3(Path inputFile, @Nullable DownloadProgressListener progressListener, @Nullable UUID downloadId) throws IOException {
+        // Check if cancelled before conversion
+        if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
+            throw new IOException("Download cancelled before conversion");
+        }
+
         if (progressListener != null) {
             progressListener.progressStartRequest(Component.literal("Converting audio to MP3..."));
         }
@@ -145,7 +152,12 @@ public class YtDlpDownloader {
             try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(process.getInputStream()))) {
                 String line;
                 while ((line = reader.readLine()) != null) {
-                    // Optionally log FFmpeg output
+                    // Check periodically during conversion if cancelled
+                    if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
+                        process.destroy();
+                        Files.deleteIfExists(outputFile);
+                        throw new IOException("Download cancelled during conversion");
+                    }
                 }
             }
 
@@ -181,10 +193,18 @@ public class YtDlpDownloader {
      * Downloads audio from URL and caches it, with automatic format conversion
      * @param url The URL to download from
      * @param progressListener Optional progress listener
+     * @param downloadId Optional download ID for cancellation tracking
      * @return Path to the cached audio file (always mp3)
      */
-    public static Path downloadAudio(String url, @Nullable DownloadProgressListener progressListener)
+    public static Path downloadAudio(String url, @Nullable DownloadProgressListener progressListener, @Nullable UUID downloadId)
             throws IOException {
+
+        // Check if cancelled before starting
+        if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
+            System.out.println("[Etched YT-DLP] Download cancelled before start: " + url);
+            throw new IOException("Download cancelled before start");
+        }
+
         YtDlpManager.ensureInstalled(progressListener);
         Path cachedFile = getCachedPath(url, "mp3");
 
@@ -193,11 +213,18 @@ public class YtDlpDownloader {
             if (progressListener != null) {
                 progressListener.progressStartRequest(Component.literal("Using cached audio..."));
             }
+            System.out.println("[Etched YT-DLP] Using cached file for: " + url);
             return cachedFile;
         }
 
         if (progressListener != null) {
             progressListener.progressStartRequest(Component.literal("Downloading audio..."));
+        }
+
+        // Check again after initialization
+        if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
+            System.out.println("[Etched YT-DLP] Download cancelled during setup: " + url);
+            throw new IOException("Download cancelled during setup");
         }
 
         String urlHash = hashUrl(url);
@@ -248,8 +275,15 @@ public class YtDlpDownloader {
             throw new IOException("Failed to download audio: " + e.getMessage(), e);
         }
 
-        // Wait for download to complete (check for .part files)
+        // Wait for download to complete (check for .part files) with periodic cancellation checks
         for (int i = 0; i < 15; i++) {
+            // Check if cancelled during wait
+            if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
+                System.out.println("[Etched YT-DLP] Download cancelled during processing, cleaning up...");
+                cleanupPartialDownload(urlHash);
+                throw new IOException("Download cancelled");
+            }
+
             try {
                 Thread.sleep(1000);
             } catch (InterruptedException ignored) {}
@@ -266,6 +300,13 @@ public class YtDlpDownloader {
 
         // If mp3 doesn't exist, find downloaded file and convert if necessary
         if (!Files.exists(cachedFile)) {
+            // Check one more time before conversion
+            if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
+                System.out.println("[Etched YT-DLP] Download cancelled before file processing");
+                cleanupPartialDownload(urlHash);
+                throw new IOException("Download cancelled before conversion");
+            }
+
             Path downloadedFile = findDownloadedFile(urlHash);
 
             if (downloadedFile == null) {
@@ -278,13 +319,28 @@ public class YtDlpDownloader {
             // Check if format needs conversion
             if (!"mp3".equals(extension)) {
                 System.out.println("[Etched YT-DLP] Format is not MP3, converting...");
-                downloadedFile = convertToMp3(downloadedFile, progressListener);
+                downloadedFile = convertToMp3(downloadedFile, progressListener, downloadId);
+            }
+
+            // Final check before moving to cache
+            if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
+                System.out.println("[Etched YT-DLP] Download cancelled after conversion");
+                Files.deleteIfExists(downloadedFile);
+                throw new IOException("Download cancelled after conversion");
             }
 
             // Move to final location if needed
             if (!downloadedFile.equals(cachedFile)) {
                 Files.move(downloadedFile, cachedFile, StandardCopyOption.REPLACE_EXISTING);
             }
+        }
+
+        // Final check before returning
+        if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
+            System.out.println("[Etched YT-DLP] Download cancelled, removing completed file");
+            // Delete the file we just created since it was cancelled
+            Files.deleteIfExists(cachedFile);
+            throw new IOException("Download cancelled after completion");
         }
 
         if (!Files.exists(cachedFile)) {
@@ -294,7 +350,28 @@ public class YtDlpDownloader {
         // Validate the final file
         validateAudioFile(cachedFile);
 
+        System.out.println("[Etched YT-DLP] Successfully downloaded and cached: " + url);
         return cachedFile;
+    }
+
+    /**
+     * Cleans up partial downloads for a given URL hash
+     */
+    private static void cleanupPartialDownload(String urlHash) {
+        try {
+            Files.list(CACHE_DIR)
+                    .filter(p -> p.getFileName().toString().startsWith(urlHash))
+                    .forEach(p -> {
+                        try {
+                            Files.deleteIfExists(p);
+                            System.out.println("[Etched YT-DLP] Cleaned up partial file: " + p.getFileName());
+                        } catch (IOException e) {
+                            System.err.println("[Etched YT-DLP] Failed to cleanup file: " + e.getMessage());
+                        }
+                    });
+        } catch (IOException e) {
+            System.err.println("[Etched YT-DLP] Error during cleanup: " + e.getMessage());
+        }
     }
 
     /**

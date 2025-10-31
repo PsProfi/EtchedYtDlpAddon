@@ -1,10 +1,10 @@
 package com.psprofi.etchedytdlp.core;
 
-import com.psprofi.etchedytdlp.LocalAudioServer;
 import com.psprofi.etchedytdlp.YouTube.YtDlpSource;
 import com.psprofi.etchedytdlp.YouTube.YtDlpUpdater;
 import gg.moonflower.etched.api.sound.download.SoundSourceManager;
 import net.minecraftforge.common.MinecraftForge;
+import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.server.ServerStartingEvent;
 import net.minecraftforge.event.server.ServerStoppingEvent;
 import net.minecraftforge.eventbus.api.IEventBus;
@@ -16,7 +16,8 @@ import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
 @Mod("etchedytdlp")
 public class EtchedYtDlpAddon {
 
-    public static final String MOD_ID = "etchedytdlp";
+    private static int cleanupTimer = 0;
+    private static final int CLEANUP_INTERVAL = 6000; // Every 5 minutes (6000 ticks)
 
     public EtchedYtDlpAddon() {
         IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
@@ -50,12 +51,43 @@ public class EtchedYtDlpAddon {
             System.err.println("[Etched YT-DLP] Failed to start local audio server: " + e.getMessage());
             e.printStackTrace();
         }
+
+        // Reset cleanup timer
+        cleanupTimer = 0;
     }
 
     @SubscribeEvent
     public void onServerStopping(ServerStoppingEvent event) {
+        // Cancel all active downloads
+        DownloadTracker.cancelAll();
+        DownloadTracker.clear();
+
         // Stop local HTTP server
         LocalAudioServer.stop();
         System.out.println("[Etched YT-DLP] Local audio server stopped");
+    }
+
+    @SubscribeEvent
+    public void onServerTick(TickEvent.ServerTickEvent event) {
+        // Only run cleanup during END phase to avoid double-execution
+        if (event.phase != TickEvent.Phase.END) {
+            return;
+        }
+
+        cleanupTimer++;
+
+        // Run cleanup every 5 minutes
+        if (cleanupTimer >= CLEANUP_INTERVAL) {
+            cleanupTimer = 0;
+
+            // Clean up stale downloads that weren't properly completed
+            DownloadTracker.cleanupStaleDownloads();
+
+            // Optional: Log active download count if any exist
+            int activeCount = DownloadTracker.getActiveDownloadCount();
+            if (activeCount > 0) {
+                System.out.println("[Etched YT-DLP] Active downloads: " + activeCount);
+            }
+        }
     }
 }

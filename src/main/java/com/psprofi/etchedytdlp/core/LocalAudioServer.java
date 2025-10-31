@@ -1,4 +1,4 @@
-package com.psprofi.etchedytdlp;
+package com.psprofi.etchedytdlp.core;
 
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpHandler;
@@ -9,7 +9,6 @@ import java.io.OutputStream;
 import java.net.InetSocketAddress;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -20,7 +19,7 @@ import java.util.concurrent.ConcurrentHashMap;
  */
 public class LocalAudioServer {
 
-    private static HttpServer server;
+    public static HttpServer server;
     private static final int PORT = 25565 + 100; // Use port 25665 (Minecraft port + 100)
     private static final Map<String, Path> fileRegistry = new ConcurrentHashMap<>();
     private static boolean started = false;
@@ -83,7 +82,7 @@ public class LocalAudioServer {
     /**
      * HTTP handler for serving audio files
      */
-    private static class AudioFileHandler implements HttpHandler {
+    public static class AudioFileHandler implements HttpHandler {
         @Override
         public void handle(HttpExchange exchange) throws IOException {
             String path = exchange.getRequestURI().getPath();

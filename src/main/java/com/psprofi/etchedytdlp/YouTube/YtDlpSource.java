@@ -1,7 +1,8 @@
 package com.psprofi.etchedytdlp.YouTube;
 
 import com.google.gson.JsonObject;
-import com.psprofi.etchedytdlp.LocalAudioServer;
+import com.psprofi.etchedytdlp.core.DownloadTracker;
+import com.psprofi.etchedytdlp.core.LocalAudioServer;
 import gg.moonflower.etched.api.record.TrackData;
 import gg.moonflower.etched.api.sound.download.SoundDownloadSource;
 import gg.moonflower.etched.api.util.DownloadProgressListener;
@@ -19,9 +20,11 @@ import java.net.URISyntaxException;
 import java.net.URL;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * YT-DLP based sound source supporting YouTube, SoundCloud, Spotify and 1000+ sites
+ * Now with download cancellation support to prevent duplicate records
  * @author PsProfi
  */
 public class YtDlpSource implements SoundDownloadSource {
@@ -31,16 +34,72 @@ public class YtDlpSource implements SoundDownloadSource {
 
     private final Map<String, Boolean> validCache = new WeakHashMap<>();
 
+    // Store download IDs per URL so we can track and cancel them
+    private static final Map<String, UUID> urlToDownloadId = new ConcurrentHashMap<>();
+
     @Override
     public List<URL> resolveUrl(String url, @Nullable DownloadProgressListener progressListener, Proxy proxy) throws IOException {
-        // Download and cache the audio
-        Path audioFile = YtDlpDownloader.downloadAudio(url, progressListener);
+        // Start tracking this download
+        UUID downloadId = DownloadTracker.startDownload(url);
+        urlToDownloadId.put(url, downloadId);
 
-        // Register file with local HTTP server and get HTTP URL
-        // Etched expects HTTP URLs, not file:// URLs
-        String httpUrl = LocalAudioServer.registerFile(audioFile);
+        System.out.println("[Etched YT-DLP] Starting download for URL: " + url + " (ID: " + downloadId + ")");
 
-        return Collections.singletonList(new URL(httpUrl));
+        try {
+            // Check if cancelled before starting
+            if (DownloadTracker.isCancelled(downloadId)) {
+                System.out.println("[Etched YT-DLP] Download was already cancelled: " + url);
+                throw new IOException("Download was cancelled before starting");
+            }
+
+            // Download and cache the audio (with cancellation support)
+            Path audioFile = YtDlpDownloader.downloadAudio(url, progressListener, downloadId);
+
+            // Check if download completed successfully (not cancelled)
+            if (!DownloadTracker.completeDownload(downloadId)) {
+                // Download was cancelled during processing
+                System.out.println("[Etched YT-DLP] Download was cancelled during processing: " + url);
+                urlToDownloadId.remove(url);
+                throw new IOException("Download was cancelled");
+            }
+
+            // Register file with local HTTP server and get HTTP URL
+            // Etched expects HTTP URLs, not file:// URLs
+            String httpUrl = LocalAudioServer.registerFile(audioFile);
+
+            System.out.println("[Etched YT-DLP] Successfully completed download: " + url);
+            urlToDownloadId.remove(url);
+            return Collections.singletonList(new URL(httpUrl));
+
+        } catch (IOException e) {
+            // Clean up on error
+            System.err.println("[Etched YT-DLP] Download failed: " + e.getMessage());
+            DownloadTracker.completeDownload(downloadId);
+            urlToDownloadId.remove(url);
+            throw e;
+        }
+    }
+
+    /**
+     * Cancel a download for a specific URL
+     * Call this when the record is picked up before loading completes
+     */
+    public static void cancelDownload(String url) {
+        UUID downloadId = urlToDownloadId.get(url);
+        if (downloadId != null) {
+            DownloadTracker.cancelDownload(downloadId);
+            System.out.println("[Etched YT-DLP] Cancelled download for URL: " + url + " (ID: " + downloadId + ")");
+        } else {
+            System.out.println("[Etched YT-DLP] No active download found to cancel for URL: " + url);
+        }
+    }
+
+    /**
+     * Check if a URL currently has an active download
+     */
+    public static boolean hasActiveDownload(String url) {
+        UUID downloadId = urlToDownloadId.get(url);
+        return downloadId != null && !DownloadTracker.isCancelled(downloadId);
     }
 
     @Override
