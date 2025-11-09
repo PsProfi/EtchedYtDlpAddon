@@ -15,8 +15,8 @@ import java.time.temporal.ChronoUnit;
  */
 public class YtDlpUpdater {
 
-    private static final Path YTDLP_PATH = Paths.get("tools", "yt-dlp");
-    private static final Path YTDLP_PATH_EXE = Paths.get("tools", "yt-dlp.exe");
+    private static final Path YTDLP_PATH = Paths.get("ytdlp_tools", "yt-dlp");
+    private static final Path YTDLP_PATH_EXE = Paths.get("ytdlp_tools", "yt-dlp.exe");
     private static final int MAX_AGE_DAYS = 30; // Force update after 30 days
 
     /**

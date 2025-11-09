@@ -33,13 +33,13 @@ public class LocalAudioServer {
         }
 
         try {
-            server = HttpServer.create(new InetSocketAddress("127.0.0.1", PORT), 0);
+            server = HttpServer.create(new InetSocketAddress("0.0.0.0", PORT), 0);
             server.createContext("/audio", new AudioFileHandler());
             server.setExecutor(null); // Use default executor
             server.start();
             started = true;
 
-            System.out.println("[Etched YT-DLP] Local audio server started on http://127.0.0.1:" + PORT);
+            System.out.println("[Etched YT-DLP] Local audio server started on http://0.0.0.0:" + PORT);
         } catch (IOException e) {
             System.err.println("[Etched YT-DLP] Failed to start local server: " + e.getMessage());
             throw e;

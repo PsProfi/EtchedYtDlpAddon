@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * YT-DLP based sound source supporting YouTube, SoundCloud, Spotify and 1000+ sites
- * Now with download cancellation support to prevent duplicate records
+ * Now with synchronized playback - server downloads once, all players hear it in sync
  * @author PsProfi
  */
 public class YtDlpSource implements SoundDownloadSource {
@@ -52,23 +52,27 @@ public class YtDlpSource implements SoundDownloadSource {
                 throw new IOException("Download was cancelled before starting");
             }
 
-            // Download and cache the audio (with cancellation support)
+            // SERVER DOWNLOADS THE AUDIO (not each client)
             Path audioFile = YtDlpDownloader.downloadAudio(url, progressListener, downloadId);
 
             // Check if download completed successfully (not cancelled)
             if (!DownloadTracker.completeDownload(downloadId)) {
-                // Download was cancelled during processing
                 System.out.println("[Etched YT-DLP] Download was cancelled during processing: " + url);
                 urlToDownloadId.remove(url);
                 throw new IOException("Download was cancelled");
             }
 
-            // Register file with local HTTP server and get HTTP URL
-            // Etched expects HTTP URLs, not file:// URLs
+            // Register with local HTTP server
+            // This creates an HTTP URL that ALL PLAYERS can access
             String httpUrl = LocalAudioServer.registerFile(audioFile);
 
             System.out.println("[Etched YT-DLP] Successfully completed download: " + url);
+            System.out.println("[Etched YT-DLP] All players can access: " + httpUrl);
+
             urlToDownloadId.remove(url);
+
+            // Return the HTTP URL - Etched will use this to create an AudioSource
+            // All clients will connect to this same URL and play in sync
             return Collections.singletonList(new URL(httpUrl));
 
         } catch (IOException e) {
@@ -143,12 +147,6 @@ public class YtDlpSource implements SoundDownloadSource {
             if (info.has("thumbnail") && !info.get("thumbnail").isJsonNull()) {
                 return Optional.of(GsonHelper.getAsString(info, "thumbnail"));
             }
-
-            // Alternative: download thumbnail locally
-            // Path thumbnail = YtDlpDownloader.downloadThumbnail(url, progressListener);
-            // if (thumbnail != null) {
-            //     return Optional.of(thumbnail.toUri().toString());
-            // }
         } catch (Exception e) {
             // Silently fail for album art - not critical
         }
@@ -168,8 +166,6 @@ public class YtDlpSource implements SoundDownloadSource {
                 host = host.toLowerCase();
 
                 // Support common sites - yt-dlp supports 1800+ sites
-                // You can add more sites here or remove this check entirely
-                // to support all yt-dlp sites
                 return host.contains("youtube.com") ||
                         host.contains("youtu.be") ||
                         host.contains("soundcloud.com") ||
@@ -191,13 +187,13 @@ public class YtDlpSource implements SoundDownloadSource {
 
     @Override
     public boolean isTemporary(String url) {
-        // Audio is cached locally, not temporary
+        // Audio is cached locally on server, not temporary
         return false;
     }
 
     @Override
     public String getApiName() {
-        return "YT-DLP";
+        return "sound_source.etched.ytdlp";
     }
 
     @Override
@@ -210,19 +206,19 @@ public class YtDlpSource implements SoundDownloadSource {
 
                 // Return platform-specific branding
                 if (host.contains("youtube.com") || host.contains("youtu.be")) {
-                    return Optional.of(Component.literal("YouTube")
+                    return Optional.of(Component.translatable("etchedytdlp.platform.youtube")
                             .withStyle(style -> style.withColor(TextColor.fromRgb(0xFF0000))));
                 } else if (host.contains("soundcloud.com")) {
-                    return Optional.of(Component.literal("SoundCloud")
+                    return Optional.of(Component.translatable("etchedytdlp.platform.soundcloud")
                             .withStyle(style -> style.withColor(TextColor.fromRgb(0xFF5500))));
                 } else if (host.contains("spotify.com")) {
-                    return Optional.of(Component.literal("Spotify")
+                    return Optional.of(Component.translatable("etchedytdlp.platform.spotify")
                             .withStyle(style -> style.withColor(TextColor.fromRgb(0x1DB954))));
                 } else if (host.contains("bandcamp.com")) {
-                    return Optional.of(Component.literal("Bandcamp")
+                    return Optional.of(Component.translatable("etchedytdlp.platform.bandcamp")
                             .withStyle(style -> style.withColor(TextColor.fromRgb(0x629AA9))));
                 } else if (host.contains("twitch.tv")) {
-                    return Optional.of(Component.literal("Twitch")
+                    return Optional.of(Component.translatable("etchedytdlp.platform.twitch")
                             .withStyle(style -> style.withColor(TextColor.fromRgb(0x9146FF))));
                 }
             }

@@ -25,7 +25,7 @@ import java.util.UUID;
  */
 public class YtDlpDownloader {
 
-    private static final Path CACHE_DIR = Paths.get("tools", "ytdlp_cache");
+    private static final Path CACHE_DIR = Paths.get("ytdlp_tools", "ytdlp_cache");
     private static final Set<String> SUPPORTED_FORMATS = new HashSet<>();
 
     static {
@@ -100,7 +100,7 @@ public class YtDlpDownloader {
         }
 
         if (progressListener != null) {
-            progressListener.progressStartRequest(Component.literal("Converting audio to MP3..."));
+            progressListener.progressStartRequest(Component.translatable("etchedytdlp.progress.converting"));
         }
 
         String inputFormat = getFileExtension(inputFile);
@@ -211,14 +211,14 @@ public class YtDlpDownloader {
         // Return cached file if exists
         if (Files.exists(cachedFile)) {
             if (progressListener != null) {
-                progressListener.progressStartRequest(Component.literal("Using cached audio..."));
+                progressListener.progressStartRequest(Component.translatable("etchedytdlp.progress.cached"));
             }
             System.out.println("[Etched YT-DLP] Using cached file for: " + url);
             return cachedFile;
         }
 
         if (progressListener != null) {
-            progressListener.progressStartRequest(Component.literal("Downloading audio..."));
+            progressListener.progressStartRequest(Component.translatable("etchedytdlp.progress.downloading"));
         }
 
         // Check again after initialization
@@ -260,6 +260,15 @@ public class YtDlpDownloader {
         args.add("--postprocessor-args");
         args.add("ffmpeg:-acodec libmp3lame -b:a 320k -ar 44100");
 
+        args.add("--cache-dir");
+        args.add(CACHE_DIR.resolve("metadata_cache").toString());
+        args.add("--no-check-certificates");
+        args.add("--no-warnings");
+        args.add("--quiet");
+        args.add("--ignore-errors");
+        args.add("--skip-unavailable-fragments");
+
+
         // Output template (yt-dlp will add extension)
         args.add("-o");
         args.add(outputTemplate + ".%(ext)s");
@@ -276,8 +285,10 @@ public class YtDlpDownloader {
         }
 
         // Wait for download to complete (check for .part files) with periodic cancellation checks
-        for (int i = 0; i < 15; i++) {
-            // Check if cancelled during wait
+        for (int i = 0; i < 5; i++) {
+            if (Files.exists(cachedFile)) break;
+
+        // Check if cancelled during wait
             if (downloadId != null && DownloadTracker.isCancelled(downloadId)) {
                 System.out.println("[Etched YT-DLP] Download cancelled during processing, cleaning up...");
                 cleanupPartialDownload(urlHash);
@@ -285,7 +296,7 @@ public class YtDlpDownloader {
             }
 
             try {
-                Thread.sleep(1000);
+                Thread.sleep(500);
             } catch (InterruptedException ignored) {}
 
             // Check if .part file exists (download in progress)

@@ -25,7 +25,7 @@ import java.util.concurrent.TimeUnit;
 public class YtDlpManager {
 
     private static final String YTDLP_VERSION = "2025.10.22";  // IMPORTANT: Update regularly for YouTube fixes
-    private static final Path TOOLS_DIR = Paths.get("tools");
+    private static final Path TOOLS_DIR = Paths.get("ytdlp_tools");
     private static final Path YTDLP_PATH = TOOLS_DIR.resolve(getExecutableName("yt-dlp"));
     private static final Path FFMPEG_PATH = TOOLS_DIR.resolve(getExecutableName("ffmpeg"));
     private static final Path FFPROBE_PATH = TOOLS_DIR.resolve(getExecutableName("ffprobe"));
@@ -81,7 +81,7 @@ public class YtDlpManager {
         // Download yt-dlp
         if (!Files.exists(YTDLP_PATH)) {
             if (progressListener != null) {
-                progressListener.progressStartRequest(Component.literal("Downloading yt-dlp... (one-time setup)"));
+                progressListener.progressStartRequest(Component.translatable("etchedytdlp.progress.onetimesetupytdlp"));
             }
 
             downloadBinary(getDownloadUrl(), YTDLP_PATH);
@@ -95,7 +95,7 @@ public class YtDlpManager {
         // Download ffmpeg and ffprobe if not present
         if (!Files.exists(FFMPEG_PATH) || !Files.exists(FFPROBE_PATH)) {
             if (progressListener != null) {
-                progressListener.progressStartRequest(Component.literal("Downloading ffmpeg... (one-time setup)"));
+                progressListener.progressStartRequest(Component.translatable("etchedytdlp.progress.onetimesetupffmpeg"));
             }
 
             downloadFfmpeg();
